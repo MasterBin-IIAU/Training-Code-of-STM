@@ -52,7 +52,8 @@ palette = Image.open(DAVIS_ROOT + '/Annotations/480p/blackswan/00000.png').getpa
 
 torch.backends.cudnn.benchmark = True
 
-Trainset1 = Coco_MO_Train('{}train2017'.format(COCO_ROOT),'{}annotations/instances_train2017.json'.format(COCO_ROOT))
+# Trainset1 = Coco_MO_Train('{}train2017'.format(COCO_ROOT),'{}annotations/instances_train2017.json'.format(COCO_ROOT))
+Trainset1 = Coco_MO_Train(os.path.join(COCO_ROOT, 'images/train2017'), os.path.join(COCO_ROOT, 'annotations/instances_train2017.json'))
 Trainloader1 = data.DataLoader(Trainset1, batch_size=1, num_workers=1,shuffle = True, pin_memory=True)
 loader_iter1 = iter(Trainloader1)
 

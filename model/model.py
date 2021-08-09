@@ -19,7 +19,7 @@ import argparse
 import copy
 import sys
 
-from resnest.torch import resnest101
+# from resnest.torch import resnest101
 from utils.helpers import *
  
 
