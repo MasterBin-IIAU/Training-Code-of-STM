@@ -348,6 +348,14 @@ class Coco_MO_Train(data.Dataset):
         return sampled_f_m
 
 
+def init_seeds(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 if __name__ == '__main__':
     import os
     import sys
@@ -357,6 +365,7 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     import pdb
     import argparse
+    init_seeds(42)
     def get_arguments():
         parser = argparse.ArgumentParser(description="xxx")
         parser.add_argument("-o", type=str, help="", default='./tmp')
