@@ -33,6 +33,10 @@ class Coco_MO_Train(data.Dataset):
         self.sampled_aug = sampled_aug()
         #self.augment = PhotometricDistort()
         self.in_sz = 384  # Network Input size during training (default value is 384)
+        """add img_anno_mapping (speed up further processing)"""
+        map_json_path = json_path.replace("instances_train2017.json", "instances_train2017_image_anno.json")
+        with open(map_json_path) as fm:
+            self.img_anno_map = json.load(fm)
 
     def __len__(self):
         return len(self.images_list)
@@ -214,15 +218,10 @@ class Coco_MO_Train(data.Dataset):
     def __getitem__(self, index):
         images = self.images_list[index]
         image_name = images['file_name']
-        url = images['coco_url']
         id_ = images['id']
         # 获取该张图片对应的实例信息（包括mask，box等等）
-        # TODO: 现在这种写法效率太低，应该先把图片和ID的对应关系预先保存下来，然后直接读取
-        instances_list = []
-        for anno in self.anno_list:
-            if anno['image_id'] == id_:
-                instances_list.append(anno)
-
+        # 这里要注意，经过json.dump和json.load之后，字典的key会变成字符串类型！因此这里需要将整数转成字符串
+        instances_list = self.img_anno_map[str(id_)]
         info = {}
         info['name'] = image_name
         info['num_frames'] = 3
