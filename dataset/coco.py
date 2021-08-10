@@ -1,18 +1,10 @@
-import os
-import os.path as osp
 import numpy as np
 from PIL import Image
-from torchvision import transforms
 import torch
-import torchvision
 from torch.utils import data
 import random
-import glob
-import math
 import cv2
 import json
-
-import imgaug as ia
 import imgaug.augmenters as iaa
 import math
 
@@ -31,8 +23,6 @@ class Coco_MO_Train(data.Dataset):
 
     def __init__(self, img_dir,json_path):
         self.image_dir = img_dir
-
-
         self.K = 11
         self.skip = 0
         with open(json_path) as f:
@@ -239,39 +229,32 @@ class Coco_MO_Train(data.Dataset):
 
         N_frames = np.empty((3,)+(self.in_sz,self.in_sz,)+(3,), dtype=np.float32)
         N_masks = np.empty((3,)+(self.in_sz,self.in_sz,), dtype=np.uint8)
-        frames_ = []
-        masks_ = []
 
-        # print(os.path.join(self.image_dir,image + '.jpg'),os.path.join(self.mask_dir,image + '.png'))
         frame = np.array(Image.open(os.path.join(self.image_dir,image_name)).convert('RGB'))
         h,w,_ = frame.shape
         mask = np.zeros((h,w,20)).astype(np.uint8)
 
-        if random.random() < 0.5:
-            object_index = 1
-            # mask list是把mask大小满足要求（大于2000个像素）的实例mask加入其中
-            mask_list = []
-            for inst in instances_list:
-                segs = inst['segmentation']
-                segs_list = []
-                try:
-                    for seg in segs:
-                        if len(np.array(seg).shape) == 0:
-                            continue
-                        tmp = np.array(seg).reshape(-1,2).astype(np.int32)
-                        segs_list.append(tmp)
-                    tmp_mask = np.zeros((h,w))
-                    tmp_mask = cv2.fillPoly(tmp_mask, segs_list,1)
-                    if np.sum(tmp_mask) < 2000:
+        object_index = 1
+        # mask list是把mask大小满足要求（大于2000个像素）的实例mask加入其中
+        mask_list = []
+        for inst in instances_list:
+            segs = inst['segmentation']
+            segs_list = []
+            try:
+                for seg in segs:
+                    if len(np.array(seg).shape) == 0:
                         continue
-                    mask_list.append(tmp_mask)
-                    object_index += 1   
-                except:
-                    pass
-
-
-           	
-
+                    tmp = np.array(seg).reshape(-1, 2).astype(np.int32)
+                    segs_list.append(tmp)
+                tmp_mask = np.zeros((h, w))
+                tmp_mask = cv2.fillPoly(tmp_mask, segs_list, 1)
+                if np.sum(tmp_mask) < 2000:
+                    continue
+                mask_list.append(tmp_mask)
+                object_index += 1
+            except:
+                pass
+        if random.random() < 0.5:
             # 把前面一步的mask_list里的元素填到预定义的mask数组里，从第一个通道开始填（第0个通道空出来）
             for i,tmp_mask in enumerate(mask_list):
                 mask[:,:,i+1] = tmp_mask
@@ -284,81 +267,9 @@ class Coco_MO_Train(data.Dataset):
             else:
                 # 如果当前图片上一个满足要求的实例都没有，则需要做复制粘贴，
                 # 把来自其他图片的满足要求的实例贴到当前图片上
-                tmp_sample_num = random.randint(1,3)  # 尝试粘贴的实例数量
-                sampled_objects = []
-                max_iter = 20
-                while tmp_sample_num > 0 and max_iter > 0:
-                    max_iter -= 1
-                    # 从数据集中随机采样一个实例，
-                    # TODO: 这里也可以事先就把满足（边界框大小）条件的实例id给保存起来，这样就不用试错了
-                    tmp = random.sample(self.anno_list,1)
-                    if tmp[0]['bbox'][2] * tmp[0]['bbox'][3] < 3000:
-                        continue
-                    sampled_objects.append(tmp[0])
-                    tmp_sample_num -= 1
-            
-
-            
-
-                sampled_f_m = []
-                for sampled_object in sampled_objects:
-                    ob_img_path = os.path.join(self.image_dir,str(sampled_object['image_id']).zfill(12) + '.jpg')
-                    ob_frame = np.array(Image.open(ob_img_path).convert('RGB'))
-                    h,w,_ = ob_frame.shape
-                    ob_segs = sampled_object['segmentation']
-                    ob_bbox = sampled_object['bbox']  # (x1, y1, w, h)
-                    ob_segs_list = []
-                    try:
-                        for ob_seg in ob_segs:
-                            tmp = np.array(ob_seg).reshape(-1,2).astype(np.int32)
-                            ob_segs_list.append(tmp)
-                        ob_mask = np.zeros((h,w)).astype(np.uint8)
-                        ob_mask = cv2.fillPoly(ob_mask, ob_segs_list,object_index)
-                        object_index += 1
-
-                        y1,y2 = int(ob_bbox[1]),int(ob_bbox[1] + ob_bbox[3])
-                        x1,x2 = int(ob_bbox[0]),int(ob_bbox[0] + ob_bbox[2])
-                        # 得到采样到的实例所对应的frame区域和mask区域
-                        ob_mask = ob_mask[y1:y2,x1:x2]
-                        ob_frame = ob_frame[y1:y2,x1:x2,:]
-                        # 区域大小是由实例大小决定的, 裁剪出的区域大小等于2倍的save_h_w
-                        save_h_w = int(math.sqrt(ob_bbox[3] ** 2 + ob_bbox[2] ** 2))
-                        # np.lib.pad(array, pad_width, mode='constant', **kwargs)
-                        ob_mask = np.lib.pad(ob_mask,((int((save_h_w - ob_bbox[3])/2),int((save_h_w - ob_bbox[3])/2)),
-                                                      (int((save_h_w - ob_bbox[2])/2),int((save_h_w - ob_bbox[2])/2))),
-                                             'constant',constant_values=0)
-                        ob_frame = np.lib.pad(ob_frame,((int((save_h_w - ob_bbox[3])/2),int((save_h_w - ob_bbox[3])/2)),
-                                                        (int((save_h_w - ob_bbox[2])/2),int((save_h_w - ob_bbox[2])/2)),
-                                                        (0,0)),'constant',constant_values=0)
-
-                        # cv2.imwrite('test.jpg',ob_frame)
-                        # cv2.imwrite('test.png',ob_mask*255)
-                        sampled_f_m.append([ob_frame,ob_mask])
-                    except:
-                        pass        
+                sampled_f_m = self.get_sampled_f_m(object_index)
                 frames_,masks_ = self.Augmentation(frame,mask,sampled_f_m)
-
         else:
-
-            object_index = 1
-            mask_list = []
-            for inst in instances_list:
-                segs = inst['segmentation']
-                segs_list = []
-                try:
-                    for seg in segs:
-                        if len(np.array(seg).shape) == 0:
-                            continue
-                        tmp = np.array(seg).reshape(-1,2).astype(np.int32)
-                        segs_list.append(tmp)
-                    tmp_mask = np.zeros((h,w))
-                    tmp_mask = cv2.fillPoly(tmp_mask, segs_list,1)
-                    if np.sum(tmp_mask) < 2000:
-                        continue
-                    mask_list.append(tmp_mask)
-                    object_index += 1   
-                except:
-                    pass
             # 如果当前图像上满足要求的实例数量大于5了，则随机取5个
             if len(mask_list) > 5:
                 mask_list = random.sample(mask_list,5)
@@ -370,55 +281,7 @@ class Coco_MO_Train(data.Dataset):
             # 得到当前图像原生的mask， shape是(h, w), 取值是1, 2, 3,...
             mask = np.argmax(mask,axis = 2).astype(np.uint8)
             # 不管当前帧目前有多少个（不会超过5个）满足要求的实例，这里都再额外加1~3个来自其他帧的实例
-            tmp_sample_num = random.randint(1,3)
-            sampled_objects = []
-            max_iter = 20
-            while tmp_sample_num > 0 and max_iter > 0:
-                max_iter -= 1
-                tmp = random.sample(self.anno_list,1)
-                if tmp[0]['bbox'][2] * tmp[0]['bbox'][3] < 3000:
-                    continue
-                sampled_objects.append(tmp[0])
-                tmp_sample_num -= 1
-            
-
-            
-
-            sampled_f_m = []
-            for sampled_object in sampled_objects:
-                ob_img_path = os.path.join(self.image_dir,str(sampled_object['image_id']).zfill(12) + '.jpg')
-                ob_frame = np.array(Image.open(ob_img_path).convert('RGB'))
-                h,w,_ = ob_frame.shape
-                ob_segs = sampled_object['segmentation']
-                ob_bbox = sampled_object['bbox']
-                ob_segs_list = []
-                try:
-                    for ob_seg in ob_segs:
-                        tmp = np.array(ob_seg).reshape(-1,2).astype(np.int32)
-                        ob_segs_list.append(tmp)
-                    ob_mask = np.zeros((h,w)).astype(np.uint8)
-                    ob_mask = cv2.fillPoly(ob_mask, ob_segs_list,object_index)
-                    object_index += 1
-
-                    y1,y2 = int(ob_bbox[1]),int(ob_bbox[1] + ob_bbox[3])
-                    x1,x2 = int(ob_bbox[0]),int(ob_bbox[0] + ob_bbox[2])
-                    ob_mask = ob_mask[y1:y2,x1:x2]
-                    ob_frame = ob_frame[y1:y2,x1:x2,:]
-
-                    save_h_w = int(math.sqrt(ob_bbox[3] ** 2 + ob_bbox[2] ** 2))
-
-                    ob_mask = np.lib.pad(ob_mask,((int((save_h_w - ob_bbox[3])/2),int((save_h_w - ob_bbox[3])/2)),
-                                                  (int((save_h_w - ob_bbox[2])/2),int((save_h_w - ob_bbox[2])/2))),
-                                         'constant',constant_values=0)
-                    ob_frame = np.lib.pad(ob_frame,((int((save_h_w - ob_bbox[3])/2),int((save_h_w - ob_bbox[3])/2)),
-                                                    (int((save_h_w - ob_bbox[2])/2),int((save_h_w - ob_bbox[2])/2)),
-                                                    (0,0)),'constant',constant_values=0)
-
-                    # cv2.imwrite('test.jpg',ob_frame)
-                    # cv2.imwrite('test.png',ob_mask*255)
-                    sampled_f_m.append([ob_frame,ob_mask])
-                except:
-                    pass        
+            sampled_f_m = self.get_sampled_f_m(object_index)
             frames_,masks_ = self.Augmentation(frame,mask,sampled_f_m)
 
         num_object = 0
@@ -435,6 +298,54 @@ class Coco_MO_Train(data.Dataset):
             num_object += 1
         num_objects = torch.LongTensor([num_object])
         return Fs, Ms, num_objects, info
+
+
+    def get_sampled_f_m(self, object_index):
+        tmp_sample_num = random.randint(1, 3)  # 尝试粘贴的实例数量
+        sampled_objects = []
+        max_iter = 20
+        while tmp_sample_num > 0 and max_iter > 0:
+            max_iter -= 1
+            # TODO: 这里也可以事先就把满足（边界框大小）条件的实例id给保存起来，这样就不用试错了
+            tmp = random.sample(self.anno_list, 1)
+            if tmp[0]['bbox'][2] * tmp[0]['bbox'][3] < 3000:
+                continue
+            sampled_objects.append(tmp[0])
+            tmp_sample_num -= 1
+        sampled_f_m = []
+        for sampled_object in sampled_objects:
+            ob_img_path = os.path.join(self.image_dir, str(sampled_object['image_id']).zfill(12) + '.jpg')
+            ob_frame = np.array(Image.open(ob_img_path).convert('RGB'))
+            h, w, _ = ob_frame.shape
+            ob_segs = sampled_object['segmentation']
+            ob_bbox = sampled_object['bbox']  # (x1, y1, w, h)
+            ob_segs_list = []
+            try:
+                for ob_seg in ob_segs:
+                    tmp = np.array(ob_seg).reshape(-1, 2).astype(np.int32)
+                    ob_segs_list.append(tmp)
+                ob_mask = np.zeros((h, w)).astype(np.uint8)
+                ob_mask = cv2.fillPoly(ob_mask, ob_segs_list, object_index)
+                object_index += 1
+
+                y1, y2 = int(ob_bbox[1]), int(ob_bbox[1] + ob_bbox[3])
+                x1, x2 = int(ob_bbox[0]), int(ob_bbox[0] + ob_bbox[2])
+                # 得到采样到的实例所对应的frame区域和mask区域
+                ob_mask = ob_mask[y1:y2, x1:x2]
+                ob_frame = ob_frame[y1:y2, x1:x2, :]
+                # 区域大小是由实例大小决定的, 裁剪出的区域大小等于2倍的save_h_w
+                save_h_w = int(math.sqrt(ob_bbox[3] ** 2 + ob_bbox[2] ** 2))
+                # np.lib.pad(array, pad_width, mode='constant', **kwargs)
+                ob_mask = np.lib.pad(ob_mask, ((int((save_h_w - ob_bbox[3]) / 2), int((save_h_w - ob_bbox[3]) / 2)),
+                                               (int((save_h_w - ob_bbox[2]) / 2), int((save_h_w - ob_bbox[2]) / 2))),
+                                     'constant', constant_values=0)
+                ob_frame = np.lib.pad(ob_frame, ((int((save_h_w - ob_bbox[3]) / 2), int((save_h_w - ob_bbox[3]) / 2)),
+                                                 (int((save_h_w - ob_bbox[2]) / 2), int((save_h_w - ob_bbox[2]) / 2)),
+                                                 (0, 0)), 'constant', constant_values=0)
+                sampled_f_m.append([ob_frame, ob_mask])
+            except:
+                pass
+        return sampled_f_m
 
 
 if __name__ == '__main__':
@@ -456,7 +367,8 @@ if __name__ == '__main__':
     davis_root = args.Ddavis
     coco_root = args.Dcoco
     output_dir = args.o
-    dataset = Coco_MO_Train('{}train2017'.format(coco_root),'{}annotations/instances_train2017.json'.format(coco_root))
+    dataset = Coco_MO_Train(os.path.join(coco_root, 'images/train2017'),
+                            os.path.join(coco_root, 'annotations/instances_train2017.json'))
     palette = Image.open('{}Annotations/480p/blackswan/00000.png'.format(davis_root)).getpalette()
 
     if not os.path.exists(output_dir):
@@ -475,4 +387,6 @@ if __name__ == '__main__':
         out_img = Image.fromarray(out_img)
         print('saving images to {}'.format(output_dir))
         out_img.save(os.path.join(output_dir, str(i).zfill(5) + '.jpg'))
-        pdb.set_trace()
+        # pdb.set_trace()
+        if i > 10:
+            break
